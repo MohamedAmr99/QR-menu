@@ -1,0 +1,26 @@
+{
+  "name": "qr-menu",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "functions"
+  ],
+  "scripts": {
+    "build": "npm run build -w @qr-menu/shared && npm run build -w functions",
+    "typecheck": "tsc -p packages/shared && tsc -p functions --noEmit && tsc -p tests --noEmit && tsc -p scripts --noEmit",
+    "test": "vitest run --project shared",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-qr-menu \"vitest run --project rules\"",
+    "emulators": "firebase emulators:start --project demo-qr-menu",
+    "seed": "tsx scripts/seed.ts"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.10.0",
+    "firebase-admin": "^13.4.0",
+    "firebase-tools": "^14.27.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

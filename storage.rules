@@ -1,0 +1,24 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOwner(rid) {
+      return request.auth != null
+        && request.auth.token.role == 'owner'
+        && request.auth.token.restaurantId == rid;
+    }
+
+    // Menu images and logos: public to read, the owner uploads (max 5 MB, images only).
+    match /restaurants/{rid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isOwner(rid)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(rid);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

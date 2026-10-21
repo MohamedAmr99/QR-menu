@@ -1,0 +1,186 @@
+rules_version = '2';
+
+// Tenant isolation: every restaurant's data lives under restaurants/{rid}, and an
+// owner's token carries restaurantId + role (custom claims set by the server).
+// Customers are anonymous: they read publicMenus only; calls and orders go
+// through Cloud Functions.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return signedIn() && request.auth.token.role == 'superAdmin';
+    }
+
+    function isOwner(rid) {
+      return signedIn()
+        && request.auth.token.role == 'owner'
+        && request.auth.token.restaurantId == rid;
+    }
+
+    function restaurant(rid) {
+      return get(/databases/$(database)/documents/restaurants/$(rid)).data;
+    }
+
+    // Suspended restaurants and lapsed subscriptions become read-only.
+    function isLive(rid) {
+      let r = restaurant(rid);
+      return r.status == 'active' && r.subscription.status in ['trial', 'active', 'grace'];
+    }
+
+    function ownerCanWrite(rid) {
+      return isOwner(rid) && isLive(rid);
+    }
+
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function isLocalized(t, maxLen) {
+      return t is map
+        && t.keys().hasOnly(['ar', 'en'])
+        && t.ar is string && t.ar.size() <= maxLen
+        && (!('en' in t) || (t.en is string && t.en.size() <= maxLen));
+    }
+
+    function isRequiredLocalized(t) {
+      return isLocalized(t, 200) && t.ar.size() > 0;
+    }
+
+    function underLimit(rid, countKey, limitKey) {
+      let r = restaurant(rid);
+      let limit = r.subscription.limits[limitKey];
+      return limit == null || r.counts[countKey] < limit;
+    }
+
+    function validCategory(d) {
+      return d.keys().hasOnly(['name', 'order', 'hidden', 'deleted', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['name', 'order', 'hidden', 'deleted'])
+        && isRequiredLocalized(d.name)
+        && d.order is number
+        && d.hidden is bool
+        && d.deleted is bool;
+    }
+
+    function validItem(d) {
+      return d.keys().hasOnly([
+          'categoryId', 'name', 'description', 'priceMinor', 'imagePath', 'imageUrl',
+          'tags', 'available', 'hidden', 'order', 'deleted', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['categoryId', 'name', 'priceMinor', 'available', 'hidden', 'order', 'deleted'])
+        && d.categoryId is string
+        && isRequiredLocalized(d.name)
+        && (!('description' in d) || isLocalized(d.description, 500))
+        && d.priceMinor is int && d.priceMinor >= 0 && d.priceMinor <= 10000000
+        && (!('tags' in d) || (d.tags is list && d.tags.size() <= 3
+            && d.tags.hasOnly(['vegetarian', 'spicy', 'new'])))
+        && d.available is bool
+        && d.hidden is bool
+        && d.order is number
+        && d.deleted is bool;
+    }
+
+    function validTable(d) {
+      return d.keys().hasOnly(['label', 'number', 'active', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['label', 'number', 'active'])
+        && d.label is string && d.label.size() > 0 && d.label.size() <= 20
+        && d.number is int && d.number >= 1 && d.number <= 999
+        && d.active is bool;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    match /plans/{planId} {
+      allow read: if signedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    match /subscriptions/{rid} {
+      allow read: if isOwner(rid) || isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // The one document a customer reads per scan. Written by Functions only.
+    match /publicMenus/{slug} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /restaurants/{rid} {
+      allow read: if isOwner(rid) || isSuperAdmin();
+      allow create, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin()
+        || (ownerCanWrite(rid)
+            && changed().hasOnly([
+                'name', 'logoUrl', 'theme', 'languages', 'workingHours',
+                'contact', 'social', 'settings', 'updatedAt'])
+            && isRequiredLocalized(request.resource.data.name));
+
+      match /categories/{categoryId} {
+        allow read: if isOwner(rid) || isSuperAdmin();
+        allow create, update: if ownerCanWrite(rid) && validCategory(request.resource.data);
+        allow delete: if false; // soft delete with deleted: true
+      }
+
+      match /items/{itemId} {
+        allow read: if isOwner(rid) || isSuperAdmin();
+        allow create: if ownerCanWrite(rid)
+          && validItem(request.resource.data)
+          && underLimit(rid, 'items', 'maxItems');
+        allow update: if ownerCanWrite(rid) && validItem(request.resource.data);
+        allow delete: if false;
+      }
+
+      match /tables/{tableId} {
+        allow read: if isOwner(rid) || isSuperAdmin();
+        allow create: if ownerCanWrite(rid)
+          && validTable(request.resource.data)
+          && underLimit(rid, 'tables', 'maxTables');
+        allow update: if ownerCanWrite(rid) && validTable(request.resource.data);
+        allow delete: if ownerCanWrite(rid);
+      }
+
+      // Created by the createCall function; the owner only moves the status.
+      match /calls/{callId} {
+        allow read: if isOwner(rid) || isSuperAdmin();
+        allow create, delete: if false;
+        allow update: if isOwner(rid)
+          && changed().hasOnly(['status', 'handledBy', 'handledAt'])
+          && request.resource.data.status in ['open', 'ack', 'done']
+          && request.resource.data.handledBy == request.auth.uid;
+      }
+
+      // Created by the createOrder function. The anonymous customer can follow
+      // their own order; the owner moves the status.
+      match /orders/{orderId} {
+        allow read: if isOwner(rid) || isSuperAdmin()
+          || (signedIn() && resource.data.createdByUid == request.auth.uid);
+        allow create, delete: if false;
+        allow update: if isOwner(rid)
+          && changed().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in
+             ['new', 'accepted', 'preparing', 'ready', 'served', 'cancelled'];
+      }
+
+      // Push-notification tokens of the owner's phones and screens.
+      match /devices/{deviceId} {
+        allow read, delete: if isOwner(rid);
+        allow create, update: if isOwner(rid)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['uid', 'fcmToken', 'platform', 'userAgent', 'createdAt', 'lastSeenAt'])
+          && request.resource.data.fcmToken is string
+          && request.resource.data.platform in ['web', 'ios', 'android'];
+      }
+
+      // Server-only bookkeeping (order numbers, rate limits).
+      match /{serverOnly=**} {
+        allow read, write: if false;
+      }
+    }
+  }
+}
