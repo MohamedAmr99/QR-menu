@@ -14,6 +14,7 @@ Design of the database: see the "قاعدة بيانات منيو QR (SaaS)" doc
 ```
 packages/shared   types, zod schemas, can(), pricing, public-menu builder (+ unit tests)
 functions         Cloud Functions (europe-west1): publish menu, counters, subscriptions, createCall, createOrder, push notifications
+apps/menu         customer menu at /r/{slug}?t={table} (React, no Firebase SDK: plain REST, ~77 KB gzip)
 apps/dashboard    restaurant dashboard (React + Vite + Tailwind, Arabic RTL, mobile first)
 tests/rules       Firestore and Storage security-rules tests (run on the emulator)
 scripts/seed.ts   demo data for the emulators
@@ -30,6 +31,7 @@ npm run build        # bundles functions into functions/lib
 npm run emulators    # all emulators with the demo-qr-menu project
 npm run seed         # in a second terminal, while the emulators run
 npm run dev:dashboard  # http://localhost:5174 against the emulators
+npm run dev:menu       # http://localhost:5173/r/demo?t=3
 ```
 
 Deploying to the real project: see [docs/DEPLOY.md](docs/DEPLOY.md).

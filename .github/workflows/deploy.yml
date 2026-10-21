@@ -47,4 +47,4 @@ jobs:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Deploy
         if: env.HAS_KEY == 'true'
-        run: npx firebase deploy --project prod --only firestore,storage,functions,hosting:dashboard --force --non-interactive
+        run: npx firebase deploy --project prod --only firestore,storage,functions,hosting --force --non-interactive
