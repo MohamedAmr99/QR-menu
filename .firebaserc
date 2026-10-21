@@ -7,7 +7,7 @@
     "qr-menu-c0167": {
       "hosting": {
         "dashboard": ["qr-menu-c0167"],
-        "menu": ["qr-menu-c0167-menu"]
+        "menu": ["qrmenu-c0167"]
       }
     }
   }
