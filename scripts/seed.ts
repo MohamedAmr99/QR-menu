@@ -1,6 +1,7 @@
 /**
  * Seeds the local emulators with plans, a super admin and two demo restaurants.
- * Safe to run twice. Usage: npm run emulators  (in one terminal), then npm run seed.
+ * Run it while all emulators run (npm run emulators), so the Functions build the
+ * public menus and the item/table counters. Usage: npm run seed.
  */
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -77,6 +78,8 @@ async function seedRestaurant(opts: {
 
   const plan = PLANS[opts.planId]!;
   const ref = db.doc(`restaurants/${opts.rid}`);
+  // Counters are kept by the Functions; on a re-run keep them as they are.
+  const existingCounts = (await ref.get()).get('counts') ?? { items: 0, tables: 0 };
   await ref.set({
     name: opts.name,
     slug: opts.slug,
@@ -91,7 +94,7 @@ async function seedRestaurant(opts: {
     social: { instagram: '', facebook: '', tiktok: '' },
     settings: { callWaiterEnabled: true, ordersEnabled: true, takeawayEnabled: true, showPrices: true },
     subscription: { planId: opts.planId, status: 'active', endsAt: null, limits: plan.limits, features: plan.features },
-    counts: { items: 0, tables: 0 },
+    counts: existingCounts,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -128,8 +131,6 @@ async function seedRestaurant(opts: {
   for (let n = 1; n <= opts.tables; n++) {
     await ref.collection('tables').doc(`t${n}`).set({ label: String(n), number: n, active: true });
   }
-  // Without the Functions emulator the counters triggers do not run, so set them here.
-  await ref.update({ counts: { items: itemCount, tables: opts.tables } });
   console.log(`  ${opts.slug}: ${itemCount} items, ${opts.tables} tables, owner ${opts.ownerEmail} / password123`);
 }
 

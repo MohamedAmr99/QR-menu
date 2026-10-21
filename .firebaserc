@@ -1,5 +1,14 @@
 {
   "projects": {
-    "default": "demo-qr-menu"
+    "default": "demo-qr-menu",
+    "prod": "qr-menu-c0167"
+  },
+  "targets": {
+    "qr-menu-c0167": {
+      "hosting": {
+        "dashboard": ["qr-menu-c0167"],
+        "menu": ["qr-menu-c0167-menu"]
+      }
+    }
   }
 }
