@@ -11,7 +11,6 @@ export async function createEnv(): Promise<RulesTestEnvironment> {
   return initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { rules: readFileSync('firestore.rules', 'utf8') },
-    storage: { rules: readFileSync('storage.rules', 'utf8') },
   });
 }
 
@@ -44,7 +43,6 @@ export const itemDoc = (over: Record<string, unknown> = {}) => ({
   name: { ar: 'شاي', en: 'Tea' },
   description: { ar: '', en: '' },
   priceMinor: 1500,
-  imagePath: null,
   imageUrl: null,
   tags: [],
   available: true,
@@ -62,11 +60,13 @@ export async function seedTwoRestaurants(env: RulesTestEnvironment) {
     await setDoc(doc(db, 'restaurants/B'), restaurantDoc('owner-b', 'cafe-b'));
     await setDoc(doc(db, 'restaurants/A/items/i1'), itemDoc());
     await setDoc(doc(db, 'restaurants/B/items/i1'), itemDoc());
+    await setDoc(doc(db, 'restaurants/A/tables/t1'), { label: '1', number: 1, active: true });
+    await setDoc(doc(db, 'restaurants/A/tables/t2'), { label: '2', number: 2, active: false });
     await setDoc(doc(db, 'restaurants/A/orders/o1'), {
-      type: 'dine_in', status: 'new', createdByUid: 'guest-1', totalMinor: 1500,
+      type: 'dine_in', status: 'new', createdByUid: 'guest-1', lines: [],
     });
     await setDoc(doc(db, 'restaurants/A/calls/c1'), {
-      type: 'waiter', status: 'open', createdByUid: 'guest-1', handledBy: null, handledAt: null,
+      type: 'waiter', status: 'open', createdByUid: 'guest-1',
     });
     await setDoc(doc(db, 'publicMenus/cafe-a'), { restaurantId: 'A', categories: [] });
     await setDoc(doc(db, 'subscriptions/A'), { planId: 'basic', status: 'active' });

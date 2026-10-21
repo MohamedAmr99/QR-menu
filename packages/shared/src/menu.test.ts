@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { category, item, restaurant, subscription } from './fixtures.test-helpers.js';
-import { buildPublicMenu } from './menu.js';
+import { buildPublicMenu, menuContentHash } from './menu.js';
 
 describe('buildPublicMenu', () => {
   it('orders categories and items and drops hidden or deleted ones', () => {
@@ -67,5 +67,27 @@ describe('buildPublicMenu', () => {
     expect(menu.access.ordersEnabled).toBe(true);
     expect(menu.access.takeawayEnabled).toBe(false);
     expect(menu.access.callEnabled).toBe(false);
+  });
+
+  it('lists only active tables, in order, while the menu is live', () => {
+    const tables = [
+      { number: 2, label: 'VIP', active: true },
+      { number: 1, label: '1', active: true },
+      { number: 3, label: '3', active: false },
+    ];
+    expect(buildPublicMenu('r1', restaurant(), [], [], 1, tables).tables).toEqual([
+      { number: 1, label: '1' },
+      { number: 2, label: 'VIP' },
+    ]);
+    const lapsed = restaurant({ subscription: subscription({ status: 'expired' }) });
+    expect(buildPublicMenu('r1', lapsed, [], [], 1, tables).tables).toEqual([]);
+  });
+
+  it('fingerprints content, not the version', () => {
+    const a = buildPublicMenu('r1', restaurant(), [category('c')], [item('i', 'c')], 1);
+    const b = buildPublicMenu('r1', restaurant(), [category('c')], [item('i', 'c')], 9);
+    const c = buildPublicMenu('r1', restaurant(), [category('c')], [item('i', 'c', { priceMinor: 5000 })], 1);
+    expect(menuContentHash(a)).toBe(menuContentHash(b));
+    expect(menuContentHash(a)).not.toBe(menuContentHash(c));
   });
 });

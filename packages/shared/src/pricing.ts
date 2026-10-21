@@ -1,4 +1,4 @@
-import type { LocalizedText, OrderLine, OrderLineInput, PublicMenu } from './types.js';
+import type { LocalizedText, OrderLine, OrderLineInput, PublicMenuItem } from './types.js';
 
 export class OrderError extends Error {
   constructor(
@@ -15,7 +15,7 @@ export class OrderError extends Error {
  * Service and VAT stay 0 until the accountant confirms the rules.
  */
 export function priceOrder(
-  menu: Pick<PublicMenu, 'categories'>,
+  menu: { categories: { items: Pick<PublicMenuItem, 'id' | 'name' | 'priceMinor' | 'available'>[] }[] },
   lines: OrderLineInput[],
 ): { lines: OrderLine[]; subtotalMinor: number; totalMinor: number } {
   const byId = new Map<string, { name: LocalizedText; priceMinor: number; available: boolean }>();

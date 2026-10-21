@@ -54,6 +54,13 @@ export type OrderLine = {
   note: string;
 };
 
+/** Written by the dashboard when the owner's screen first sees a new order. */
+export type OrderPricing = {
+  lines: OrderLine[];
+  subtotalMinor: number;
+  totalMinor: number;
+};
+
 export type PublicMenuItem = {
   id: string;
   name: LocalizedText;
@@ -70,6 +77,8 @@ export type PublicMenuCategory = {
   items: PublicMenuItem[];
 };
 
+export type PublicMenuTable = { number: number; label: string };
+
 export type PublicMenu = {
   restaurantId: string;
   version: number;
@@ -84,6 +93,7 @@ export type PublicMenu = {
     showPrices: boolean;
     showBrandFooter: boolean;
   };
+  tables: PublicMenuTable[];
   categories: PublicMenuCategory[];
   access: {
     menuVisible: boolean;
