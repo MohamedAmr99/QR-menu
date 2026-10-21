@@ -6,6 +6,7 @@ One-time setup in the Firebase console, then every merge to `main` deploys by it
 2. **Firestore**: create the database in `europe-west1`. The region cannot change later.
 3. **Authentication**: enable *Email/Password* and *Anonymous*.
 4. **Storage**: create the default bucket.
+4b. **Hosting**: Hosting > Add another site, named `qr-menu-c0167-menu`. The dashboard uses the default site (`qr-menu-c0167.web.app`), the customer menu uses `qr-menu-c0167-menu.web.app` until the domain is bought. The menu link is printed on the QR codes, so settle the final domain before printing for real customers.
 5. **Web app**: Project settings > General > Add app (Web). Copy its config into the repository variables below.
 6. **Cloud Messaging** (push notifications): Project settings > Cloud Messaging > Web Push certificates > Generate key pair. Copy the key into `VITE_FIREBASE_VAPID_KEY`.
 7. **Service account**: Google Cloud > IAM > Service accounts > create one with the roles *Firebase Admin*, *Cloud Functions Admin*, *Service Account User* and *Cloud Build Editor*, then create a JSON key.

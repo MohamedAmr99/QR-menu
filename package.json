@@ -8,13 +8,14 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @qr-menu/shared && npm run build -w functions && npm run build -w dashboard",
+    "build": "npm run build -w @qr-menu/shared && npm run build -w functions && npm run build -w dashboard && npm run build -w menu",
     "typecheck": "tsc -p packages/shared && tsc -p functions --noEmit && tsc -p tests --noEmit && tsc -p scripts --noEmit",
     "test": "vitest run --project shared",
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-qr-menu \"vitest run --project rules\"",
     "emulators": "firebase emulators:start --project demo-qr-menu",
     "seed": "tsx scripts/seed.ts",
-    "dev:dashboard": "npm run dev -w dashboard"
+    "dev:dashboard": "npm run dev -w dashboard",
+    "dev:menu": "npm run dev -w menu"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
