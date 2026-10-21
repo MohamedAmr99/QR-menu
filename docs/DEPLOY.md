@@ -4,12 +4,12 @@ One-time setup in the Firebase console, then every merge to `main` deploys by it
 
 1. **Firestore**: create the database in `europe-west1` (production mode). The region cannot change later.
 2. **Authentication**: enable *Email/Password* and *Anonymous*.
-3. **Hosting**: the dashboard uses the default site (`qr-menu-c0167.web.app`). Add a second site named `qr-menu-c0167-menu` (Hosting > Add another site) for the customer menu. The menu link is printed on the QR codes, so settle the final domain before printing for real customers.
+3. **Hosting**: the dashboard uses the default site (`qr-menu-c0167.web.app`). Add a second site named `qrmenu-c0167` (Hosting > Add another site) for the customer menu. The menu link is printed on the QR codes, so settle the final domain before printing for real customers.
 4. **Web app**: Project settings > General > Add app (Web). Copy its config into the repository variables below.
 5. **Service account**: Google Cloud > IAM > Service accounts > create one with the roles *Firebase Admin* (covers Firestore rules and Hosting), then create a JSON key.
 6. **GitHub** (repo Settings > Secrets and variables > Actions):
    - Secret `FIREBASE_SERVICE_ACCOUNT`: the whole JSON key. Never paste it anywhere else.
-   - Variables: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_APP_ID`, `VITE_MENU_BASE_URL` (the customer menu address, e.g. `https://qr-menu-c0167-menu.web.app` until the domain is bought).
+   - Variables: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_APP_ID`, `VITE_MENU_BASE_URL` (the customer menu address, e.g. `https://qrmenu-c0167.web.app` until the domain is bought).
 7. **Photos (optional)**: item photos need somewhere to live, and Firebase Storage needs Blaze. Create a free Cloudinary account, then Settings > Upload > add an *unsigned* upload preset (set a folder, allow only images, max file size 5 MB). Add the variables `VITE_CLOUDINARY_CLOUD_NAME` and `VITE_CLOUDINARY_UPLOAD_PRESET`. Without them the dashboard asks for an image link instead of an upload button.
 
 The web app config values are not secrets (they ship inside every web page); the service account key is, so it only lives in GitHub secrets.
