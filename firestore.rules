@@ -2,8 +2,9 @@ rules_version = '2';
 
 // Tenant isolation: every restaurant's data lives under restaurants/{rid}, and an
 // owner's token carries restaurantId + role (custom claims set by the server).
-// Customers are anonymous: they read publicMenus only; calls and orders go
-// through Cloud Functions.
+// Customers are anonymous: they read publicMenus and create calls and orders
+// directly (there are no Cloud Functions on the free Spark plan), so the rules
+// below do the validation and the rate limiting.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -56,6 +57,14 @@ service cloud.firestore {
       return limit == null || r.counts[countKey] < limit;
     }
 
+    // The dashboard keeps these in step with the real number of items and tables.
+    // Without Functions the plan limit is a soft limit: a determined owner can edit them.
+    function validCounts(c) {
+      return c.keys().hasOnly(['items', 'tables'])
+        && c.items is int && c.items >= 0
+        && c.tables is int && c.tables >= 0;
+    }
+
     function validCategory(d) {
       return d.keys().hasOnly(['name', 'order', 'hidden', 'deleted', 'createdAt', 'updatedAt'])
         && d.keys().hasAll(['name', 'order', 'hidden', 'deleted'])
@@ -67,13 +76,15 @@ service cloud.firestore {
 
     function validItem(d) {
       return d.keys().hasOnly([
-          'categoryId', 'name', 'description', 'priceMinor', 'imagePath', 'imageUrl',
+          'categoryId', 'name', 'description', 'priceMinor', 'imageUrl',
           'tags', 'available', 'hidden', 'order', 'deleted', 'createdAt', 'updatedAt'])
         && d.keys().hasAll(['categoryId', 'name', 'priceMinor', 'available', 'hidden', 'order', 'deleted'])
         && d.categoryId is string
         && isRequiredLocalized(d.name)
         && (!('description' in d) || isLocalized(d.description, 500))
         && d.priceMinor is int && d.priceMinor >= 0 && d.priceMinor <= 10000000
+        && (!('imageUrl' in d) || d.imageUrl == null
+            || (d.imageUrl is string && d.imageUrl.size() <= 500 && d.imageUrl.matches('https://.*')))
         && (!('tags' in d) || (d.tags is list && d.tags.size() <= 3
             && d.tags.hasOnly(['vegetarian', 'spicy', 'new'])))
         && d.available is bool
@@ -88,6 +99,59 @@ service cloud.firestore {
         && d.label is string && d.label.size() > 0 && d.label.size() <= 20
         && d.number is int && d.number >= 1 && d.number <= 999
         && d.active is bool;
+    }
+
+    // Rate limit for customers: one write per window per customer and action. The
+    // client writes rateLimits/{kind}_{uid} in the same batch with at = server time.
+    function rateOk(rid, kind, seconds) {
+      let ref = /databases/$(database)/documents/restaurants/$(rid)/rateLimits/$(kind + '_' + request.auth.uid);
+      return getAfter(ref).data.at == request.time
+        && (!exists(ref) || get(ref).data.at + duration.value(seconds, 's') < request.time);
+    }
+
+    // Table docs are named t{number}, so a customer's table number maps to one doc.
+    function activeTable(rid, n, label) {
+      let ref = /databases/$(database)/documents/restaurants/$(rid)/tables/$('t' + string(n));
+      return exists(ref) && get(ref).data.active == true && get(ref).data.label == label;
+    }
+
+    function customerCanCall(rid) {
+      return isLive(rid) && restaurant(rid).settings.callWaiterEnabled;
+    }
+
+    function customerCanOrder(rid, takeaway) {
+      let r = restaurant(rid);
+      return isLive(rid)
+        && r.subscription.features.orders
+        && r.settings.ordersEnabled
+        && (!takeaway || r.settings.takeawayEnabled);
+    }
+
+    function validCall(rid, d) {
+      return d.keys().hasOnly(['type', 'table', 'tableLabel', 'status', 'createdByUid', 'createdAt'])
+        && d.type in ['waiter', 'bill']
+        && d.table is int
+        && d.tableLabel is string
+        && activeTable(rid, d.table, d.tableLabel)
+        && d.status == 'open'
+        && d.createdByUid == request.auth.uid
+        && d.createdAt == request.time;
+    }
+
+    // Prices are not part of the customer's order: lines carry item ids and quantities
+    // only, and the owner's dashboard prices them from the real menu (pricing field).
+    function validOrder(rid, d) {
+      return d.keys().hasOnly(['type', 'table', 'tableLabel', 'lines', 'note', 'status', 'createdByUid', 'createdAt', 'updatedAt'])
+        && d.type in ['dine_in', 'takeaway']
+        && (d.type == 'takeaway'
+            ? d.table == null && d.tableLabel == null
+            : d.table is int && d.tableLabel is string && activeTable(rid, d.table, d.tableLabel))
+        && d.lines is list && d.lines.size() >= 1 && d.lines.size() <= 30
+        && d.note is string && d.note.size() <= 300
+        && d.status == 'new'
+        && d.createdByUid == request.auth.uid
+        && d.createdAt == request.time
+        && d.updatedAt == request.time;
     }
 
     match /users/{uid} {
@@ -105,10 +169,16 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
-    // The one document a customer reads per scan. Written by Functions only.
+    // The one document a customer reads per scan. The owner's dashboard rebuilds it
+    // after every change; the slug must be the owner's own restaurant.
     match /publicMenus/{slug} {
       allow read: if true;
-      allow write: if false;
+      allow create, update: if ownerCanWrite(request.resource.data.restaurantId)
+        && restaurant(request.resource.data.restaurantId).slug == slug
+        && request.resource.data.keys().hasOnly(
+             ['restaurantId', 'version', 'contentHash', 'restaurant', 'tables', 'categories', 'access', 'publishedAt'])
+        && request.resource.data.publishedAt == request.time;
+      allow delete: if isSuperAdmin();
     }
 
     match /restaurants/{rid} {
@@ -118,8 +188,9 @@ service cloud.firestore {
         || (ownerCanWrite(rid)
             && changed().hasOnly([
                 'name', 'logoUrl', 'theme', 'languages', 'workingHours',
-                'contact', 'social', 'settings', 'updatedAt'])
-            && isRequiredLocalized(request.resource.data.name));
+                'contact', 'social', 'settings', 'counts', 'updatedAt'])
+            && isRequiredLocalized(request.resource.data.name)
+            && (!('counts' in changed()) || validCounts(request.resource.data.counts)));
 
       match /categories/{categoryId} {
         allow read: if isOwner(rid) || isSuperAdmin();
@@ -139,47 +210,55 @@ service cloud.firestore {
       match /tables/{tableId} {
         allow read: if isOwner(rid) || isSuperAdmin();
         allow create: if ownerCanWrite(rid)
+          && tableId == 't' + string(request.resource.data.number)
           && validTable(request.resource.data)
           && underLimit(rid, 'tables', 'maxTables');
-        allow update: if ownerCanWrite(rid) && validTable(request.resource.data);
+        allow update: if ownerCanWrite(rid)
+          && validTable(request.resource.data)
+          && request.resource.data.number == resource.data.number;
         allow delete: if ownerCanWrite(rid);
       }
 
-      // Created by the createCall function; the owner only moves the status.
+      // Created by the anonymous customer; the owner only moves the status.
       match /calls/{callId} {
         allow read: if isOwner(rid) || isSuperAdmin();
-        allow create, delete: if false;
+        allow create: if signedIn()
+          && customerCanCall(rid)
+          && validCall(rid, request.resource.data)
+          && rateOk(rid, 'call', 30);
+        allow delete: if false;
         allow update: if isOwner(rid)
           && changed().hasOnly(['status', 'handledBy', 'handledAt'])
           && request.resource.data.status in ['open', 'ack', 'done']
           && request.resource.data.handledBy == request.auth.uid;
       }
 
-      // Created by the createOrder function. The anonymous customer can follow
-      // their own order; the owner moves the status.
+      // Created by the anonymous customer, who can follow their own order. The owner
+      // moves the status and stamps the order number and the prices.
       match /orders/{orderId} {
         allow read: if isOwner(rid) || isSuperAdmin()
           || (signedIn() && resource.data.createdByUid == request.auth.uid);
-        allow create, delete: if false;
+        allow create: if signedIn()
+          && customerCanOrder(rid, request.resource.data.type == 'takeaway')
+          && validOrder(rid, request.resource.data)
+          && rateOk(rid, 'order', 15);
+        allow delete: if false;
         allow update: if isOwner(rid)
-          && changed().hasOnly(['status', 'updatedAt'])
+          && changed().hasOnly(['status', 'updatedAt', 'orderNo', 'pricing', 'cancelReason'])
           && request.resource.data.status in
              ['new', 'accepted', 'preparing', 'ready', 'served', 'cancelled'];
       }
 
-      // Push-notification tokens of the owner's phones and screens.
-      match /devices/{deviceId} {
-        allow read, delete: if isOwner(rid);
-        allow create, update: if isOwner(rid)
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.keys().hasOnly(['uid', 'fcmToken', 'platform', 'userAgent', 'createdAt', 'lastSeenAt'])
-          && request.resource.data.fcmToken is string
-          && request.resource.data.platform in ['web', 'ios', 'android'];
+      // Daily order number, advanced by the owner's dashboard.
+      match /counters/{counterId} {
+        allow read, write: if ownerCanWrite(rid);
       }
 
-      // Server-only bookkeeping (order numbers, rate limits).
-      match /{serverOnly=**} {
-        allow read, write: if false;
+      match /rateLimits/{limitId} {
+        allow create, update: if signedIn()
+          && limitId.matches('(call|order)_' + request.auth.uid)
+          && request.resource.data.keys().hasOnly(['at'])
+          && request.resource.data.at == request.time;
       }
     }
   }

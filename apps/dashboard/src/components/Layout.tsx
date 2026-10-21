@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useRestaurant } from '../lib/session';
 import { canEdit } from '../lib/live';
+import { LiveSync, PublishBadge } from '../lib/sync';
 import { ReadOnlyBanner } from './ui';
 
 const tabs = [
@@ -16,7 +17,9 @@ export function Layout() {
     <div className="mx-auto min-h-dvh max-w-3xl pb-24">
       <header className="sticky top-0 z-30 flex items-center justify-between bg-stone-100/90 px-4 py-3 backdrop-blur">
         <h1 className="truncate text-lg font-bold">{restaurant.name.ar}</h1>
+        <PublishBadge />
       </header>
+      <LiveSync />
       <main className="px-4">
         {!canEdit(restaurant) && <ReadOnlyBanner />}
         <Outlet />

@@ -1,9 +1,8 @@
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useState, type FormEvent } from 'react';
 import { restaurantEditableSchema } from '@qr-menu/shared';
-import { db, storage } from '../firebase';
-import { compressImage } from '../lib/image';
+import { db } from '../firebase';
+import { compressImage, imageUploadEnabled, uploadImage } from '../lib/image';
 import { canEdit } from '../lib/live';
 import { logout, useRestaurant } from '../lib/session';
 import { Button, Card, Field, Input, Toggle } from '../components/ui';
@@ -26,6 +25,7 @@ export function Settings() {
     primary: r.theme.primary,
     accent: r.theme.accent,
     english: r.languages.includes('en'),
+    logoLink: r.logoUrl ?? '',
   });
   const [saved, setSaved] = useState('');
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -44,15 +44,20 @@ export function Settings() {
       languages: form.english ? ['ar', 'en'] : ['ar'],
     });
     if (!parsed.success) return setSaved('في بيانات مش مظبوطة');
-    await updateDoc(restaurantRef, { ...parsed.data, updatedAt: serverTimestamp() });
+    const logoUrl = form.logoLink.trim() || null;
+    if (logoUrl && !logoUrl.startsWith('https://')) return setSaved('لينك اللوجو لازم يبدأ بـ https://');
+    await updateDoc(restaurantRef, {
+      ...parsed.data,
+      ...(imageUploadEnabled ? {} : { logoUrl }),
+      updatedAt: serverTimestamp(),
+    });
     setSaved('اتحفظ');
     setTimeout(() => setSaved(''), 2000);
   }
 
   async function uploadLogo(file: File) {
-    const path = `restaurants/${rid}/logo-${Date.now()}.webp`;
-    await uploadBytes(ref(storage, path), await compressImage(file, 400), { contentType: 'image/webp' });
-    await updateDoc(restaurantRef, { logoUrl: await getDownloadURL(ref(storage, path)), updatedAt: serverTimestamp() });
+    const logoUrl = await uploadImage(await compressImage(file, 400), `restaurants/${rid}/logo`);
+    await updateDoc(restaurantRef, { logoUrl, updatedAt: serverTimestamp() });
   }
 
   return (
@@ -76,11 +81,17 @@ export function Settings() {
       <form onSubmit={save}>
         <Card className="space-y-3">
           <h2 className="font-bold">بيانات المطعم</h2>
-          <label className="flex cursor-pointer items-center gap-3">
-            {r.logoUrl ? <img src={r.logoUrl} alt="" className="size-16 rounded-full object-cover" /> : <div className="size-16 rounded-full bg-stone-200" />}
-            <span className="text-sm font-bold underline">{r.logoUrl ? 'غيّر اللوجو' : 'أضف لوجو'}</span>
-            <input type="file" accept="image/*" className="hidden" disabled={!editable} onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
-          </label>
+          {imageUploadEnabled ? (
+            <label className="flex cursor-pointer items-center gap-3">
+              {r.logoUrl ? <img src={r.logoUrl} alt="" className="size-16 rounded-full object-cover" /> : <div className="size-16 rounded-full bg-stone-200" />}
+              <span className="text-sm font-bold underline">{r.logoUrl ? 'غيّر اللوجو' : 'أضف لوجو'}</span>
+              <input type="file" accept="image/*" className="hidden" disabled={!editable} onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
+            </label>
+          ) : (
+            <Field label="لينك اللوجو (اختياري)" hint="رفع الصور مش متفعّل لسه. ممكن تلزق لينك https.">
+              <Input dir="ltr" inputMode="url" placeholder="https://" value={form.logoLink} onChange={(e) => set('logoLink', e.target.value)} />
+            </Field>
+          )}
           <Field label="الاسم بالعربي"><Input required value={form.nameAr} onChange={(e) => set('nameAr', e.target.value)} /></Field>
           <Field label="الاسم بالإنجليزي"><Input dir="ltr" value={form.nameEn} onChange={(e) => set('nameEn', e.target.value)} /></Field>
           <div className="flex items-center justify-between"><span>المنيو بالإنجليزي كمان</span><Toggle label="إنجليزي" checked={form.english} onChange={(v) => set('english', v)} /></div>

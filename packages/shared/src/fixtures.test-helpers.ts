@@ -43,7 +43,6 @@ export const item = (id: string, categoryId: string, over: Partial<Item> = {}): 
   name: { ar: `صنف ${id}`, en: '' },
   description: { ar: '', en: '' },
   priceMinor: 4500,
-  imagePath: null,
   imageUrl: null,
   tags: [],
   available: true,

@@ -122,7 +122,7 @@ function MenuPage({ slug, table }: { slug: string; table: number | null }) {
         </nav>
       </div>
 
-      {table !== null && menu.access.callEnabled && <CallButtons slug={slug} table={table} lang={lang} />}
+      {table !== null && menu.access.callEnabled && <CallButtons menu={menu} table={table} lang={lang} />}
 
       {categories.map((c) => (
         <section key={c.id} id={`c-${c.id}`} className="px-4 pt-5">
@@ -179,7 +179,7 @@ function MenuPage({ slug, table }: { slug: string; table: number | null }) {
 
       {cartOpen && (
         <CartSheet
-          slug={slug}
+          menu={menu}
           table={table}
           lang={lang}
           items={items}
@@ -217,13 +217,13 @@ function Header({ menu, lang, setLang, table }: { menu: PublicMenu; lang: Lang; 
   );
 }
 
-function CallButtons({ slug, table, lang }: { slug: string; table: number; lang: Lang }) {
+function CallButtons({ menu, table, lang }: { menu: PublicMenu; table: number; lang: Lang }) {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   async function call(type: 'waiter' | 'bill') {
     setBusy(true);
     try {
-      await createCall(slug, table, type);
+      await createCall(menu, table, type);
       setMsg(t('called', lang));
     } catch (err) {
       setMsg(err instanceof CallError && err.status === 'RESOURCE_EXHAUSTED' ? t('wait', lang) : t('error', lang));
@@ -285,7 +285,7 @@ function ItemSheet({
 }
 
 function CartSheet({
-  slug,
+  menu,
   table,
   lang,
   items,
@@ -294,7 +294,7 @@ function CartSheet({
   onClose,
   onPlaced,
 }: {
-  slug: string;
+  menu: PublicMenu;
   table: number | null;
   lang: Lang;
   items: Map<string, PublicMenuItem>;
@@ -312,10 +312,10 @@ function CartSheet({
     setError('');
     try {
       const lines = cart.lines.map(({ itemId, qty, note }) => ({ itemId, qty, note }));
-      onPlaced(await createOrder(slug, table, lines, note.trim()));
+      onPlaced(await createOrder(menu, table, lines, note.trim(), total));
     } catch (err) {
       const e = err as CallError;
-      setError(e.message?.startsWith('item_') ? t('itemGone', lang) : e.status === 'RESOURCE_EXHAUSTED' ? t('wait', lang) : t('error', lang));
+      setError(e.status === 'RESOURCE_EXHAUSTED' ? t('wait', lang) : t('error', lang));
     } finally {
       setBusy(false);
     }
@@ -389,7 +389,7 @@ function OrderStatus({ placed, lang, onNew }: { placed: PlacedOrder; lang: Lang;
       <div className="rounded-3xl bg-white p-5 shadow-2xl ring-1 ring-stone-200">
         <div className="flex items-baseline justify-between">
           <span className="text-stone-500">{t('orderNo', lang)}</span>
-          <span className="text-4xl font-bold text-brand">#{placed.orderNo}</span>
+          <span className="text-4xl font-bold text-brand">{order?.orderNo ? `#${order.orderNo}` : '…'}</span>
         </div>
         <p className="mt-2 text-lg font-bold" role="status">{t(`status_${status}` as StringKey, lang)}</p>
         {status !== 'cancelled' && (

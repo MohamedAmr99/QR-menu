@@ -26,7 +26,8 @@ export function Tables() {
     const batch = writeBatch(db);
     for (let i = 0; i < n; i++) {
       const number = start + i;
-      batch.set(doc(collection(db, 'restaurants', rid, 'tables')), {
+      // Named t{number} so the security rules can find a table from the number in the QR.
+      batch.set(doc(db, 'restaurants', rid, 'tables', `t${number}`), {
         label: String(number),
         number,
         active: true,

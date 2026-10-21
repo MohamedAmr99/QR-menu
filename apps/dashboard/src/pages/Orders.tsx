@@ -1,8 +1,8 @@
 import { collection, doc, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import { formatEGP, type CallType, type OrderLine, type OrderStatus, type OrderType } from '@qr-menu/shared';
+import { formatEGP, type CallType, type OrderPricing, type OrderStatus, type OrderType } from '@qr-menu/shared';
 import { db } from '../firebase';
-import { chime, disablePush, enablePush, keepScreenOn, pushAvailable, unlockAudio } from '../lib/alerts';
+import { chime, keepScreenOn, unlockAudio } from '../lib/alerts';
 import { useRestaurant } from '../lib/session';
 import { useCollection } from '../lib/useCollection';
 import { Button, Card } from '../components/ui';
@@ -10,9 +10,9 @@ import { Button, Card } from '../components/ui';
 type Order = {
   type: OrderType;
   tableLabel: string | null;
-  orderNo: number;
-  lines: OrderLine[];
-  totalMinor: number;
+  /** Both are stamped by the open dashboard a moment after the customer sends the order. */
+  orderNo?: number;
+  pricing?: OrderPricing;
   status: OrderStatus;
   note: string;
   createdAt?: { toDate(): Date };
@@ -70,11 +70,6 @@ export function Orders() {
   useChimeOnNew(calls.data.map((c) => c.id), calls.loading);
 
   const [receiveMode, setReceiveMode] = useState(false);
-  const [push, setPush] = useState<'on' | 'off' | 'denied' | 'unsupported'>(
-    localStorage.getItem('pushDeviceId') ? 'on' : 'off',
-  );
-  const [canPush, setCanPush] = useState(false);
-  useEffect(() => void pushAvailable().then(setCanPush), []);
 
   useEffect(() => {
     if (!receiveMode) return;
@@ -100,23 +95,8 @@ export function Orders() {
         >
           {receiveMode ? '🔊 وضع الاستقبال شغال' : '🔈 شغّل وضع الاستقبال'}
         </Button>
-        {canPush && (
-          <Button
-            variant="soft"
-            onClick={async () => {
-              if (push === 'on') {
-                await disablePush(rid);
-                setPush('off');
-              } else setPush(await enablePush(rid, user.uid));
-            }}
-          >
-            {push === 'on' ? 'إيقاف الإشعارات على الجهاز ده' : 'فعّل الإشعارات على الجهاز ده'}
-          </Button>
-        )}
         <p className="w-full text-xs text-stone-500">
-          {push === 'denied'
-            ? 'الإشعارات مرفوضة من المتصفح. فعّلها من إعدادات المتصفح.'
-            : 'وضع الاستقبال بيخلي الشاشة منورة ويرن مع كل طلب أو نداء. على الآيفون الإشعارات بتشتغل بس لو اللوحة متضافة للشاشة الرئيسية.'}
+          وضع الاستقبال بيخلي الشاشة منورة ويرن مع كل طلب أو نداء. سيب الصفحة دي مفتوحة طول الشغل: الطلبات والنداءات بتوصل وهي مفتوحة بس.
         </p>
       </Card>
 
@@ -155,13 +135,13 @@ export function Orders() {
               <Card key={o.id} className={o.status === 'new' ? 'ring-2 ring-emerald-500' : ''}>
                 <div className="mb-2 flex items-start justify-between">
                   <div>
-                    <div className="text-lg font-bold">#{o.orderNo} · {o.type === 'takeaway' ? 'تيك أواي' : `ترابيزة ${o.tableLabel}`}</div>
+                    <div className="text-lg font-bold">#{o.orderNo ?? '…'} · {o.type === 'takeaway' ? 'تيك أواي' : `ترابيزة ${o.tableLabel}`}</div>
                     <div className="text-sm text-stone-500">{time(o.createdAt)} · {STATUS_LABEL[o.status]}</div>
                   </div>
-                  <div className="font-bold">{formatEGP(o.totalMinor)}</div>
+                  <div className="font-bold">{o.pricing ? formatEGP(o.pricing.totalMinor) : 'جاري التسعير…'}</div>
                 </div>
                 <ul className="mb-3 space-y-1 border-y border-stone-100 py-2 text-sm">
-                  {o.lines.map((l, i) => (
+                  {(o.pricing?.lines ?? []).map((l, i) => (
                     <li key={i}>
                       <span className="font-bold">{l.qty}×</span> {l.nameSnapshot.ar}
                       {l.note && <span className="text-stone-500"> ({l.note})</span>}

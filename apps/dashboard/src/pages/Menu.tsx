@@ -9,7 +9,6 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useState, type FormEvent } from 'react';
 import {
   formatEGP,
@@ -19,8 +18,8 @@ import {
   type Category,
   type Item,
 } from '@qr-menu/shared';
-import { db, storage } from '../firebase';
-import { compressImage } from '../lib/image';
+import { db } from '../firebase';
+import { compressImage, imageUploadEnabled, uploadImage } from '../lib/image';
 import { canEdit } from '../lib/live';
 import { useRestaurant } from '../lib/session';
 import { useCollection, type WithId } from '../lib/useCollection';
@@ -253,6 +252,7 @@ function ItemSheet({
     tags: item?.tags ?? [],
     available: item?.available ?? true,
     hidden: item?.hidden ?? false,
+    imageLink: item?.imageUrl ?? '',
   });
   const [image, setImage] = useState<{ file: File; preview: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -265,21 +265,18 @@ function ItemSheet({
     try {
       const itemsCol = collection(db, 'restaurants', rid, 'items');
       const id = item?.id ?? doc(itemsCol).id;
-      let { imagePath = null, imageUrl = null } = item ?? {};
-      if (image) {
-        const blob = await compressImage(image.file);
-        const path = `restaurants/${rid}/items/${id}-${Date.now()}.webp`;
-        await uploadBytes(ref(storage, path), blob, { contentType: 'image/webp', cacheControl: 'public, max-age=31536000' });
-        if (imagePath) await deleteObject(ref(storage, imagePath)).catch(() => undefined);
-        imagePath = path;
-        imageUrl = await getDownloadURL(ref(storage, path));
+      let imageUrl: string | null = form.imageLink.trim() || null;
+      if (image) imageUrl = await uploadImage(await compressImage(image.file), `restaurants/${rid}/items`);
+      if (imageUrl && !imageUrl.startsWith('https://')) {
+        setError('لينك الصورة لازم يبدأ بـ https://');
+        setBusy(false);
+        return;
       }
       const data: Item = {
         categoryId: form.categoryId,
         name: { ar: form.ar.trim(), en: form.en.trim() },
         description: { ar: form.descAr.trim(), en: form.descEn.trim() },
         priceMinor: toMinor(Number(form.price.replace(',', '.')) || 0),
-        imagePath,
         imageUrl,
         tags: form.tags,
         available: form.available,
@@ -306,23 +303,29 @@ function ItemSheet({
           void save();
         }}
       >
-        <label className="flex cursor-pointer items-center gap-3">
-          {image || item?.imageUrl ? (
-            <img src={image?.preview ?? item?.imageUrl ?? ''} alt="" className="size-20 rounded-xl object-cover" />
-          ) : (
-            <div className="flex size-20 items-center justify-center rounded-xl bg-stone-200 text-2xl">📷</div>
-          )}
-          <span className="text-sm font-bold underline">{item?.imageUrl || image ? 'غيّر الصورة' : 'أضف صورة'}</span>
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) setImage({ file, preview: URL.createObjectURL(file) });
-            }}
-          />
-        </label>
+        {imageUploadEnabled ? (
+          <label className="flex cursor-pointer items-center gap-3">
+            {image || form.imageLink ? (
+              <img src={image?.preview ?? form.imageLink} alt="" className="size-20 rounded-xl object-cover" />
+            ) : (
+              <div className="flex size-20 items-center justify-center rounded-xl bg-stone-200 text-2xl">📷</div>
+            )}
+            <span className="text-sm font-bold underline">{form.imageLink || image ? 'غيّر الصورة' : 'أضف صورة'}</span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) setImage({ file, preview: URL.createObjectURL(file) });
+              }}
+            />
+          </label>
+        ) : (
+          <Field label="لينك صورة الصنف (اختياري)" hint="رفع الصور مش متفعّل لسه. ممكن تلزق لينك صورة https.">
+            <Input dir="ltr" inputMode="url" placeholder="https://" value={form.imageLink} onChange={(e) => set('imageLink', e.target.value)} />
+          </Field>
+        )}
         <Field label="الاسم بالعربي"><Input required value={form.ar} onChange={(e) => set('ar', e.target.value)} /></Field>
         <Field label="الاسم بالإنجليزي (اختياري)"><Input dir="ltr" value={form.en} onChange={(e) => set('en', e.target.value)} /></Field>
         <Field label="السعر بالجنيه">

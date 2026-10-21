@@ -2,19 +2,17 @@
  * Talks to Firebase over plain REST instead of the Firebase SDK, so the menu
  * stays small and opens fast on a weak 3G connection.
  */
-import type { OrderLine, OrderStatus, OrderType, PublicMenu } from '@qr-menu/shared';
+import type { OrderPricing, OrderStatus, OrderType, PublicMenu } from '@qr-menu/shared';
 
 const env = import.meta.env;
 const PROJECT = (env.VITE_FIREBASE_PROJECT_ID as string | undefined) ?? 'demo-qr-menu';
 const API_KEY = (env.VITE_FIREBASE_API_KEY as string | undefined) ?? 'fake-api-key';
-const REGION = 'europe-west1';
 const EMU = env.VITE_USE_EMULATORS === 'true' || !env.VITE_FIREBASE_API_KEY;
 const HOST = location.hostname;
 
 const FIRESTORE = EMU ? `http://${HOST}:8080` : 'https://firestore.googleapis.com';
 const AUTH = EMU ? `http://${HOST}:9099/identitytoolkit.googleapis.com` : 'https://identitytoolkit.googleapis.com';
 const TOKEN = EMU ? `http://${HOST}:9099/securetoken.googleapis.com` : 'https://securetoken.googleapis.com';
-const FUNCTIONS = EMU ? `http://${HOST}:5001/${PROJECT}/${REGION}` : `https://${REGION}-${PROJECT}.cloudfunctions.net`;
 const DOCS = `${FIRESTORE}/v1/projects/${PROJECT}/databases/(default)/documents`;
 
 type FsValue =
@@ -111,37 +109,89 @@ export class CallError extends Error {
   }
 }
 
-/** Calls an onCall Cloud Function as the anonymous customer. */
-async function callFunction<T>(name: string, data: unknown): Promise<T> {
-  const { idToken: token } = await idToken();
-  const res = await fetch(`${FUNCTIONS}/${name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ data }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.error) throw new CallError(body.error?.status ?? 'INTERNAL', body.error?.message ?? 'error');
-  return body.result as T;
+/** Plain JSON to Firestore REST typed values. */
+function encode(v: unknown): FsValue {
+  if (v === null) return { nullValue: null };
+  if (typeof v === 'string') return { stringValue: v };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(encode) } };
+  return { mapValue: { fields: encodeFields(v as Record<string, unknown>) } };
 }
 
-export const createCall = (slug: string, table: number, type: 'waiter' | 'bill') =>
-  callFunction<{ callId: string }>('createCall', { slug, table, type });
+const encodeFields = (o: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(o).map(([k, val]) => [k, encode(val)]));
 
-export type PlacedOrder = { orderId: string; restaurantId: string; orderNo: number; totalMinor: number };
+const docName = (path: string) => `projects/${PROJECT}/databases/(default)/documents/${path}`;
 
-export const createOrder = (
-  slug: string,
+/** 20-character random id, like the ones Firestore makes. */
+function newId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => chars[b % chars.length]).join('');
+}
+
+/**
+ * Writes a call or an order together with the customer's rate-limit marker in one atomic commit.
+ * The security rules check the data, the table, the settings and the marker; there is no server of ours.
+ */
+async function createWithLimit(restaurantId: string, collection: 'calls' | 'orders', kind: 'call' | 'order', id: string, data: Record<string, unknown>) {
+  const { uid, idToken: token } = await idToken();
+  const stamp = (name: string, fields: string[]) => ({
+    update: { name: docName(name), fields: {} as Record<string, FsValue> },
+    updateTransforms: fields.map((fieldPath) => ({ fieldPath, setToServerValue: 'REQUEST_TIME' })),
+  });
+  const main = { ...stamp(`restaurants/${restaurantId}/${collection}/${id}`, collection === 'calls' ? ['createdAt'] : ['createdAt', 'updatedAt']) };
+  main.update.fields = encodeFields({ ...data, createdByUid: uid });
+  const marker = stamp(`restaurants/${restaurantId}/rateLimits/${kind}_${uid}`, ['at']);
+
+  const res = await fetch(`${DOCS}:commit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ writes: [{ ...main, currentDocument: { exists: false } }, marker] }),
+  });
+  if (!res.ok) {
+    // A rejected write is almost always the rate limit; the menu was just validated on screen.
+    const body = await res.json().catch(() => ({}));
+    throw new CallError(res.status === 403 ? 'RESOURCE_EXHAUSTED' : (body.error?.status ?? 'INTERNAL'), body.error?.message ?? 'error');
+  }
+}
+
+export async function createCall(menu: PublicMenu, table: number, type: 'waiter' | 'bill') {
+  const t = menu.tables.find((x) => x.number === table);
+  if (!t) throw new CallError('NOT_FOUND', 'table not found');
+  await createWithLimit(menu.restaurantId, 'calls', 'call', newId(), { type, table, tableLabel: t.label, status: 'open' });
+}
+
+export type PlacedOrder = { orderId: string; restaurantId: string; totalMinor: number };
+
+export async function createOrder(
+  menu: PublicMenu,
   table: number | null,
   lines: { itemId: string; qty: number; note: string }[],
   note: string,
-) => callFunction<PlacedOrder>('createOrder', { slug, table, lines, note });
+  totalMinor: number,
+): Promise<PlacedOrder> {
+  const t = table === null ? null : menu.tables.find((x) => x.number === table);
+  if (table !== null && !t) throw new CallError('NOT_FOUND', 'table not found');
+  const orderId = newId();
+  await createWithLimit(menu.restaurantId, 'orders', 'order', orderId, {
+    type: t ? 'dine_in' : 'takeaway',
+    table,
+    tableLabel: t?.label ?? null,
+    lines,
+    note,
+    status: 'new',
+  });
+  // The total shown to the customer is their own cart total; the owner's screen prices the real order.
+  return { orderId, restaurantId: menu.restaurantId, totalMinor };
+}
 
 export type OrderView = {
   type: OrderType;
-  orderNo: number;
+  /** Assigned a moment after the order arrives, by the restaurant's open dashboard. */
+  orderNo?: number;
   status: OrderStatus;
-  lines: OrderLine[];
-  totalMinor: number;
+  pricing?: OrderPricing;
   tableLabel: string | null;
 };
 

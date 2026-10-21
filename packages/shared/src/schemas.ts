@@ -91,7 +91,6 @@ export const itemSchema = z.object({
   name: localizedTextSchema,
   description: optionalLocalizedText,
   priceMinor: priceMinorSchema,
-  imagePath: z.string().nullable(),
   imageUrl: z.string().nullable(),
   tags: z.array(z.enum(ITEM_TAGS)).max(ITEM_TAGS.length),
   available: z.boolean(),
@@ -106,23 +105,11 @@ export const tableSchema = z.object({
   active: z.boolean(),
 });
 
-/** Input of the createCall function (sent by the anonymous customer). */
-export const createCallInputSchema = z.object({
-  slug: slugSchema,
-  table: z.number().int().min(1).max(999),
-  type: z.enum(['waiter', 'bill']),
-});
-
 export const orderLineInputSchema = z.object({
   itemId: z.string().min(1).max(100),
   qty: z.number().int().min(1).max(50),
   note: z.string().trim().max(200).default(''),
 });
 
-/** Input of the createOrder function. No table = takeaway from the general QR. */
-export const createOrderInputSchema = z.object({
-  slug: slugSchema,
-  table: z.number().int().min(1).max(999).nullable(),
-  lines: z.array(orderLineInputSchema).min(1).max(50),
-  note: z.string().trim().max(300).default(''),
-});
+/** What a customer's order carries. No table = takeaway from the general QR. */
+export const orderLinesSchema = z.array(orderLineInputSchema).min(1).max(30);
