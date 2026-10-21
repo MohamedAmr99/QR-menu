@@ -34,7 +34,7 @@ export const onOrderCreate = onDocumentCreated('restaurants/{rid}/orders/{orderI
     e.params.rid,
     `طلب جديد #${o.orderNo}`,
     `${where} · ${formatEGP(o.totalMinor)}`,
-    `/orders/${e.params.orderId}`,
+    '/',
   );
 });
 
@@ -42,5 +42,5 @@ export const onCallCreate = onDocumentCreated('restaurants/{rid}/calls/{callId}'
   const c = e.data?.data();
   if (!c) return;
   const what = c.type === 'bill' ? 'عايز الحساب' : 'بينادي الجرسون';
-  await pushToRestaurant(e.params.rid, `ترابيزة ${c.tableLabel}`, what, '/calls');
+  await pushToRestaurant(e.params.rid, `ترابيزة ${c.tableLabel}`, what, '/');
 });
