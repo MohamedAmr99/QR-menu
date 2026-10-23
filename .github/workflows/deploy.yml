@@ -32,14 +32,15 @@ jobs:
         if: env.HAS_KEY == 'true'
         run: npm run build
         env:
+          # The web config below is public (it ships in every page); repository variables override it.
           VITE_USE_EMULATORS: 'false'
-          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY || 'AIzaSyAJ6Xp_62PQimetkiOFM2kQ49_lU0w8GUg' }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN || 'qr-menu-c0167.firebaseapp.com' }}
           VITE_FIREBASE_PROJECT_ID: qr-menu-c0167
-          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID || '1:780075193590:web:7aaf5b5cf11d01a4cc48d7' }}
           VITE_CLOUDINARY_CLOUD_NAME: ${{ vars.VITE_CLOUDINARY_CLOUD_NAME }}
           VITE_CLOUDINARY_UPLOAD_PRESET: ${{ vars.VITE_CLOUDINARY_UPLOAD_PRESET }}
-          VITE_MENU_BASE_URL: ${{ vars.VITE_MENU_BASE_URL }}
+          VITE_MENU_BASE_URL: ${{ vars.VITE_MENU_BASE_URL || 'https://qrmenu-c0167.web.app' }}
       - uses: google-github-actions/auth@v2
         if: env.HAS_KEY == 'true'
         with:
